@@ -1,34 +1,33 @@
+# nonrigid.py
+
 import SimpleITK as sitk
 import cv2
 import numpy as np
 import time
-from rigid_ORB import overlay_images
+from rigid import overlay_images, get_images, calculate_similarity_percentage
 from skimage.metrics import structural_similarity as ssim
 
 def command_iteration(method):
     print(f"최적화 반복: {method.GetOptimizerIteration()}, 메트릭 값: {method.GetMetricValue()}")
 
-def preprocess_image(image_path):
-    # 이미지를 읽고 전처리하는 함수
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    return image
-
-def b_spline_registration(fixed_image_path, moved_image_path, output_image_path):
+def b_spline_registration():
     start_time = time.time()
+    grid = 30.0
+    learning_rate = 0.5
+    number_of_iterations = 200
 
-    # 1. 이미지 전처리
+    # 1. 이미지 불러오기
     step_start_time = time.time()
-    print("1단계: 이미지 전처리")
-    fixed_image_cv = preprocess_image(fixed_image_path)
-    moved_image_cv = preprocess_image(moved_image_path)
+    print("1단계: 이미지 불러오기")
+    content, fimg, aimg = get_images()
+    fixed_image_cv = fimg
+    moved_image_cv = aimg
     step_end_time = time.time()
     print(f"1단계 완료: {step_end_time - step_start_time:.2f} 초 소요")
 
     # 2. OpenCV 이미지를 SimpleITK 이미지로 변환
     step_start_time = time.time()
     print("2단계: 이미지를 SimpleITK 포맷으로 변환")
-    # fixed_image = sitk.ReadImage(fixed_image_path, sitk.sitkFloat32)
-    # moved_image = sitk.ReadImage(moved_image_path, sitk.sitkFloat32)
     fixed_image = sitk.GetImageFromArray(fixed_image_cv.astype(np.float32))
     moved_image = sitk.GetImageFromArray(moved_image_cv.astype(np.float32))
     step_end_time = time.time()
@@ -37,7 +36,7 @@ def b_spline_registration(fixed_image_path, moved_image_path, output_image_path)
     # 3. B-spline 그리드 초기화
     step_start_time = time.time()
     print("3단계: B-spline 그리드 초기화")
-    grid_physical_spacing = [50.0, 50.0]  # 각 그리드 포인트 간격 설정
+    grid_physical_spacing = [grid, grid]  # 각 그리드 포인트 간격 설정
     image_physical_size = [fixed_image.GetSize()[i] * fixed_image.GetSpacing()[i] for i in range(2)]
     mesh_size = [int(image_physical_size[i] / grid_physical_spacing[i] + 0.5) for i in range(2)]
     initial_transform = sitk.BSplineTransformInitializer(image1=fixed_image, transformDomainMeshSize=mesh_size, order=3)
@@ -49,15 +48,14 @@ def b_spline_registration(fixed_image_path, moved_image_path, output_image_path)
     print("4단계: 정합 방법 설정")
     registration_method = sitk.ImageRegistrationMethod()
     registration_method.SetMetricAsMeanSquares()
-    registration_method.SetOptimizerAsGradientDescentLineSearch(learningRate=0.5, numberOfIterations=200, convergenceMinimumValue=1e-6, convergenceWindowSize=10)
+    registration_method.SetOptimizerAsGradientDescentLineSearch(learningRate=learning_rate, 
+                                                                numberOfIterations=number_of_iterations, 
+                                                                convergenceMinimumValue=1e-6, 
+                                                                convergenceWindowSize=10)
     registration_method.SetInitialTransform(initial_transform, inPlace=True)
     registration_method.SetInterpolator(sitk.sitkLinear)
 
-    # 멀티스케일 접근법 설정
-    # registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[4, 2, 1])
-    # registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[2, 1, 0])
-    # registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
-
+    print(f'gird: {grid}, learning_rate: {learning_rate}, number_of_iterations: {number_of_iterations}')
     # 콜백 함수 설정
     registration_method.AddCommand(sitk.sitkIterationEvent, lambda: command_iteration(registration_method))
     step_end_time = time.time()
@@ -87,23 +85,29 @@ def b_spline_registration(fixed_image_path, moved_image_path, output_image_path)
     out_array = sitk.GetArrayFromImage(out).astype(np.uint8)
 
     # 결과 이미지 저장
-    cv2.imwrite(output_image_path, out_array)
+    cv2.imwrite(f'./img/{content}/final_aligned_image.jpg', out_array)
     step_end_time = time.time()
     print(f"6단계 완료: {step_end_time - step_start_time:.2f} 초 소요")
-    print(f"결과 이미지가 {output_image_path}에 저장되었습니다.")
+    print(f"결과 이미지가 저장되었습니다.")
 
     overlayed_image = overlay_images(fixed_image_cv, out_array)
-    cv2.imwrite('./lung3/nonrigid_overlayed_image.jpg', overlayed_image)
+    cv2.imwrite(f'./img/{content}/nonrigid_overlayed_image.jpg', overlayed_image)
 
     # 정합 후 유사도 계산
-    rigid_ssim = ssim(fixed_image_cv, moved_image_cv) *100
-    final_ssim = ssim(fixed_image_cv, out_array) *100  
+    rigid_ssim = ssim(fixed_image_cv, moved_image_cv) * 100
+    final_ssim = ssim(fixed_image_cv, out_array) * 100  
     print(f"정합 전 SSIM: {rigid_ssim:.2f}%")
     print(f"정합 후 SSIM: {final_ssim:.2f}%")
 
-# 사용 예시
-fixed_image_path = './lung3/lung3_fixed.jpg'  # 고정 이미지 파일 경로
-moved_image_path = './lung3/lung3_aligned.jpg'  # 이동 이미지 파일 경로
-output_image_path = './lung3/final_aligned_image.jpg'  # 결과 이미지 저장 경로
+    # 키포인트 정확도
+    orb = cv2.ORB_create(nfeatures=1100)
+    kp1, des1 = orb.detectAndCompute(fimg, None)
+    kp2, des2 = orb.detectAndCompute(aimg, None)
+    kp4, des4 = orb.detectAndCompute(out_array, None)
+    similarity_percentage1 = calculate_similarity_percentage(kp1, kp2)
+    print(f"정합 전 두 이미지의 키 포인트 유사도: {similarity_percentage1:.2f}%")
+    similarity_percentage2 = calculate_similarity_percentage(kp1, kp4)
+    print(f"정합 후 두 이미지의 키 포인트 유사도: {similarity_percentage2:.2f}%")
 
-b_spline_registration(fixed_image_path, moved_image_path, output_image_path)
+if __name__ == "__main__":
+    b_spline_registration()

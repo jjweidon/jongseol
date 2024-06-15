@@ -27,12 +27,13 @@ def overlay_images(image1, image2, alpha=0.7):
     return overlay
 
 def get_images():
-    content = 'brain'
+    # content = 'lung3' # 1100, 100
+    content = 'brain2' # 1600, 50
 
     fimg = cv2.imread(f'./img/{content}/{content}_fixed.jpg', cv2.IMREAD_GRAYSCALE) # fixed image
     mimg = cv2.imread(f'./img/{content}/{content}_moved.jpg', cv2.IMREAD_GRAYSCALE) # moved image
 
-    orb = cv2.ORB_create(nfeatures=1100)
+    orb = cv2.ORB_create(nfeatures=1600)
     kp1, ds1 = orb.detectAndCompute(fimg, None)
     kp2, ds2 = orb.detectAndCompute(mimg, None)
 
@@ -49,7 +50,7 @@ def get_images():
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 
     good_matches = []
-    imgye = 100 # distance 임계값
+    imgye = 50 # distance 임계값
     for m in bf.match(ds1, ds2):
         if m.distance < imgye:  # 임계값은 실험적으로 설정할 수 있습니다.
             good_matches.append(m)
@@ -66,7 +67,7 @@ def get_images():
     # 추정된 변환 행렬로 이미지 변환 수행
     rows, cols = fimg.shape
     aimg = cv2.warpAffine(mimg, M, (cols, rows))
-    cv2.imwrite('./img/{content}/{content}_aligned.jpg', aimg)
+    cv2.imwrite(f'./img/{content}/{content}_aligned.jpg', aimg)
 
     # 유사도 검사
     kp1, des1 = orb.detectAndCompute(fimg, None)
@@ -84,7 +85,7 @@ def get_images():
     cv2.imwrite(f'./img/{content}/before_overlayed_image.jpg', overlayed_image1)
     cv2.imwrite(f'./img/{content}/after_overlayed_image.jpg', overlayed_image2)
 
-    return content, fimg, aimg
+    return content, fimg, mimg, aimg
 
 if __name__ == "__main__":
     get_images()
